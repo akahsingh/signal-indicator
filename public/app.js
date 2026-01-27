@@ -11,18 +11,298 @@ const historyContainer = document.getElementById('history-container');
 const loadHistoryBtn = document.getElementById('load-history-btn');
 const historyDaysSelect = document.getElementById('history-days');
 const historyTypeSelect = document.getElementById('history-type');
+const notificationBtn = document.getElementById('notification-btn');
 
 // State
 let currentFilter = 'all';
 let allSignals = [];
+let previousSignalSymbols = new Set(); // Track previous signals to detect new ones
 let refreshInterval = null;
+let notificationsEnabled = false;
+let serviceWorkerRegistration = null;
+let deferredInstallPrompt = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+  registerServiceWorker();
   fetchSignals();
   setupEventListeners();
   setupAutoRefresh();
+  setupNotifications();
+  setupInstallPrompt();
 });
+
+// ==================== PWA SERVICE WORKER ====================
+
+async function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    try {
+      serviceWorkerRegistration = await navigator.serviceWorker.register('/service-worker.js');
+      console.log('Service Worker registered:', serviceWorkerRegistration.scope);
+
+      // Listen for updates
+      serviceWorkerRegistration.addEventListener('updatefound', () => {
+        const newWorker = serviceWorkerRegistration.installing;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            // New version available
+            showUpdateAvailable();
+          }
+        });
+      });
+
+      // Request periodic background sync (if supported)
+      if ('periodicSync' in serviceWorkerRegistration) {
+        try {
+          await serviceWorkerRegistration.periodicSync.register('check-signals-periodic', {
+            minInterval: 5 * 60 * 1000 // 5 minutes
+          });
+          console.log('Periodic background sync registered');
+        } catch (error) {
+          console.log('Periodic sync not available:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Service Worker registration failed:', error);
+    }
+  }
+}
+
+function showUpdateAvailable() {
+  // Show a notification that a new version is available
+  const updateBanner = document.createElement('div');
+  updateBanner.className = 'update-banner';
+  updateBanner.innerHTML = `
+    <span>New version available!</span>
+    <button onclick="updateApp()">Update</button>
+  `;
+  document.body.prepend(updateBanner);
+}
+
+function updateApp() {
+  if (serviceWorkerRegistration && serviceWorkerRegistration.waiting) {
+    serviceWorkerRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+  }
+  window.location.reload();
+}
+
+// ==================== PWA INSTALL PROMPT ====================
+
+function setupInstallPrompt() {
+  // Capture the install prompt
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    showInstallButton();
+  });
+
+  // Handle successful install
+  window.addEventListener('appinstalled', () => {
+    console.log('PWA installed successfully');
+    hideInstallButton();
+    deferredInstallPrompt = null;
+  });
+}
+
+function showInstallButton() {
+  // Create install button if it doesn't exist
+  let installBtn = document.getElementById('install-btn');
+  if (!installBtn) {
+    installBtn = document.createElement('button');
+    installBtn.id = 'install-btn';
+    installBtn.className = 'install-btn';
+    installBtn.textContent = 'Install App';
+    installBtn.addEventListener('click', installApp);
+
+    // Add to refresh group
+    const refreshGroup = document.querySelector('.refresh-group');
+    if (refreshGroup) {
+      refreshGroup.insertBefore(installBtn, refreshGroup.firstChild);
+    }
+  }
+  installBtn.style.display = 'inline-block';
+}
+
+function hideInstallButton() {
+  const installBtn = document.getElementById('install-btn');
+  if (installBtn) {
+    installBtn.style.display = 'none';
+  }
+}
+
+async function installApp() {
+  if (!deferredInstallPrompt) {
+    console.log('Install prompt not available');
+    return;
+  }
+
+  // Show the install prompt
+  deferredInstallPrompt.prompt();
+
+  // Wait for user choice
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  console.log('User install choice:', outcome);
+
+  // Clear the deferred prompt
+  deferredInstallPrompt = null;
+  hideInstallButton();
+}
+
+// ==================== END PWA ====================
+
+// ==================== NOTIFICATION SYSTEM ====================
+
+function setupNotifications() {
+  // Check if notifications are supported
+  if (!('Notification' in window)) {
+    console.log('Browser does not support notifications');
+    return;
+  }
+
+  // Check current permission status
+  if (Notification.permission === 'granted') {
+    notificationsEnabled = true;
+    updateNotificationButton(true);
+  } else if (Notification.permission === 'denied') {
+    updateNotificationButton(false, true);
+  }
+
+  // Setup notification button click
+  if (notificationBtn) {
+    notificationBtn.addEventListener('click', requestNotificationPermission);
+  }
+}
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) {
+    alert('Your browser does not support notifications');
+    return;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+
+    if (permission === 'granted') {
+      notificationsEnabled = true;
+      updateNotificationButton(true);
+      showNotification('Notifications Enabled', 'You will now receive alerts for new trading signals!', 'info');
+    } else {
+      notificationsEnabled = false;
+      updateNotificationButton(false, permission === 'denied');
+    }
+  } catch (error) {
+    console.error('Error requesting notification permission:', error);
+  }
+}
+
+function updateNotificationButton(enabled, denied = false) {
+  if (!notificationBtn) return;
+
+  if (denied) {
+    notificationBtn.textContent = 'Notifications Blocked';
+    notificationBtn.classList.add('disabled');
+    notificationBtn.title = 'Please enable notifications in browser settings';
+  } else if (enabled) {
+    notificationBtn.textContent = 'Notifications ON';
+    notificationBtn.classList.add('active');
+    notificationBtn.classList.remove('disabled');
+  } else {
+    notificationBtn.textContent = 'Enable Notifications';
+    notificationBtn.classList.remove('active', 'disabled');
+  }
+}
+
+function showNotification(title, body, type = 'signal') {
+  if (!notificationsEnabled || Notification.permission !== 'granted') {
+    return;
+  }
+
+  const options = {
+    body: body,
+    icon: '/icons/icon.svg',
+    badge: '/icons/icon.svg',
+    tag: type === 'signal' ? 'signal-' + Date.now() : 'info',
+    requireInteraction: type === 'signal', // Keep signal notifications until user dismisses
+    silent: false,
+    vibrate: [100, 50, 100]
+  };
+
+  // Use service worker for notifications (better mobile support)
+  if (serviceWorkerRegistration && serviceWorkerRegistration.active) {
+    serviceWorkerRegistration.active.postMessage({
+      type: 'SHOW_NOTIFICATION',
+      title: title,
+      body: body,
+      tag: options.tag
+    });
+    return;
+  }
+
+  // Fallback to regular notifications
+  try {
+    const notification = new Notification(title, options);
+
+    // Click notification to focus the app
+    notification.onclick = function() {
+      window.focus();
+      notification.close();
+    };
+
+    // Auto-close info notifications after 5 seconds
+    if (type === 'info') {
+      setTimeout(() => notification.close(), 5000);
+    }
+  } catch (error) {
+    console.error('Error showing notification:', error);
+  }
+}
+
+function checkForNewSignals(newSignals) {
+  if (!notificationsEnabled || newSignals.length === 0) {
+    return;
+  }
+
+  const newSignalSymbols = new Set(newSignals.map(s => s.symbol));
+
+  // Find signals that weren't in the previous fetch
+  const brandNewSignals = newSignals.filter(s => !previousSignalSymbols.has(s.symbol));
+
+  // Show notification for each new signal
+  brandNewSignals.forEach(signal => {
+    const title = `${signal.signalType} Signal: ${signal.symbol}`;
+    const body = `Price: ${formatPrice(signal.entryPrice)} | Change: ${signal.changePercent.toFixed(2)}%\nSL: ${formatPrice(signal.stopLoss)} | Target: ${formatPrice(signal.target1)}`;
+    showNotification(title, body, 'signal');
+  });
+
+  // Update previous signals set
+  previousSignalSymbols = newSignalSymbols;
+}
+
+// Play sound for new signals (optional)
+function playAlertSound() {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.frequency.value = 800;
+    oscillator.type = 'sine';
+    gainNode.gain.value = 0.3;
+
+    oscillator.start();
+    setTimeout(() => {
+      oscillator.stop();
+      audioContext.close();
+    }, 200);
+  } catch (error) {
+    console.log('Could not play sound:', error);
+  }
+}
+
+// ==================== END NOTIFICATION SYSTEM ====================
 
 function setupEventListeners() {
   // Tab buttons
@@ -114,7 +394,17 @@ async function fetchSignals(forceRefresh = false) {
     const data = await response.json();
 
     if (data.success) {
-      allSignals = data.signals || [];
+      const newSignals = data.signals || [];
+
+      // Check for new signals and notify
+      if (allSignals.length > 0) {
+        checkForNewSignals(newSignals);
+      } else {
+        // First load - just store symbols without notifying
+        previousSignalSymbols = new Set(newSignals.map(s => s.symbol));
+      }
+
+      allSignals = newSignals;
       updateLastUpdated(data.lastUpdated);
       renderSignals();
 

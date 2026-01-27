@@ -4,6 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Intraday Signal Indicator</title>
+
+  <!-- PWA Meta Tags -->
+  <meta name="description" content="NIFTY 500 Intraday Trading Signals with ATR-based Stop Loss & Targets">
+  <meta name="theme-color" content="#1d9bf0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Signals">
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="/manifest.json">
+
+  <!-- Icons -->
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+  <link rel="apple-touch-icon" href="/icons/icon.svg">
+
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -28,6 +43,7 @@
     </div>
     <div class="refresh-group">
       <span id="last-updated">Last updated: --</span>
+      <button id="notification-btn" class="notification-btn">Enable Notifications</button>
       <button id="refresh-btn" class="refresh-btn">Refresh</button>
     </div>
   </div>

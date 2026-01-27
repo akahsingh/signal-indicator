@@ -103,6 +103,92 @@ header .subtitle {
   cursor: not-allowed;
 }
 
+/* Notification Button */
+.notification-btn {
+  padding: 8px 16px;
+  background: #2f3336;
+  border: 1px solid #3f4448;
+  color: #e7e9ea;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.notification-btn:hover {
+  background: #3f4448;
+}
+
+.notification-btn.active {
+  background: #00c853;
+  border-color: #00c853;
+  color: #fff;
+}
+
+.notification-btn.disabled {
+  background: #ff5252;
+  border-color: #ff5252;
+  color: #fff;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* PWA Install Button */
+.install-btn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #00c853, #1d9bf0);
+  border: none;
+  color: #fff;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.2s;
+  animation: pulse 2s infinite;
+}
+
+.install-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 15px rgba(29, 155, 240, 0.4);
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 200, 83, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(0, 200, 83, 0); }
+}
+
+/* Update Banner */
+.update-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(135deg, #1d9bf0, #00c853);
+  color: #fff;
+  padding: 12px 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 15px;
+  z-index: 1000;
+  font-size: 0.9rem;
+}
+
+.update-banner button {
+  padding: 6px 16px;
+  background: #fff;
+  color: #1d9bf0;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: transform 0.2s;
+}
+
+.update-banner button:hover {
+  transform: scale(1.05);
+}
+
 .loading {
   text-align: center;
   padding: 60px 20px;
