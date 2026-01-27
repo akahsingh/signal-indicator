@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intraday Signal Indicator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Intraday Signal Indicator</h1>
+    <p class="subtitle">NIFTY 500 | ATR-Based Stop Loss & Targets</p>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="live">Live Signals</button>
+    <button class="tab-btn" data-tab="history">Signal History</button>
+    <button class="tab-btn" data-tab="stats">Statistics</button>
+  </nav>
+
+  <div id="live-tab" class="tab-content active">
+  <div class="controls">
+    <div class="filter-group">
+      <label>Filter:</label>
+      <button class="filter-btn active" data-filter="all">All Signals</button>
+      <button class="filter-btn" data-filter="bullish">Bullish (BUY)</button>
+      <button class="filter-btn" data-filter="bearish">Bearish (SELL)</button>
+    </div>
+    <div class="refresh-group">
+      <span id="last-updated">Last updated: --</span>
+      <button id="refresh-btn" class="refresh-btn">Refresh</button>
+    </div>
+  </div>
+
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <p>Loading signals...</p>
+  </div>
+
+  <div id="error" class="error" style="display: none;">
+    <p>Failed to load signals. Please try again.</p>
+    <button onclick="fetchSignals()">Retry</button>
+  </div>
+
+  <div id="no-signals" class="no-signals" style="display: none;">
+    <p>No signals found. Market may be closed or no stocks meet the 3% threshold.</p>
+  </div>
+
+  <div id="signals-container" class="signals-container"></div>
+  </div>
+
+  <div id="history-tab" class="tab-content">
+    <div class="history-controls">
+      <select id="history-days">
+        <option value="1">Today</option>
+        <option value="7" selected>Last 7 days</option>
+        <option value="14">Last 14 days</option>
+        <option value="30">Last 30 days</option>
+      </select>
+      <select id="history-type">
+        <option value="">All Types</option>
+        <option value="BUY">BUY Only</option>
+        <option value="SELL">SELL Only</option>
+      </select>
+      <button id="load-history-btn" class="refresh-btn">Load History</button>
+    </div>
+    <div id="history-container" class="signals-container"></div>
+  </div>
+
+  <div id="stats-tab" class="tab-content">
+    <div id="stats-container" class="stats-container">
+      <div class="stat-card">
+        <h3>Total Signals</h3>
+        <p id="stat-total">--</p>
+      </div>
+      <div class="stat-card buy">
+        <h3>BUY Signals</h3>
+        <p id="stat-buy">--</p>
+      </div>
+      <div class="stat-card sell">
+        <h3>SELL Signals</h3>
+        <p id="stat-sell">--</p>
+      </div>
+      <div class="stat-card">
+        <h3>Unique Stocks</h3>
+        <p id="stat-stocks">--</p>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p>Auto-refresh every 5 minutes during market hours (9:15 AM - 3:30 PM IST)</p>
+    <p class="disclaimer">Disclaimer: This is for educational purposes only. Not financial advice.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
