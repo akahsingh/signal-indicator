@@ -14,6 +14,10 @@ module.exports = {
   // Target multipliers [Target1, Target2]
   ATR_TARGET_MULTIPLIERS: [2, 3],
 
+  // Exit signal threshold (percentage above open price)
+  // When stock falls to Open + EXIT_THRESHOLD%, trigger exit signal
+  EXIT_THRESHOLD: parseFloat(process.env.EXIT_THRESHOLD) || 1.5,
+
   // Data refresh interval in milliseconds (5 minutes)
   REFRESH_INTERVAL: parseInt(process.env.REFRESH_INTERVAL) || 300000,
 

@@ -1,11 +1,25 @@
 const axios = require('axios');
-const config = require('../config');
 
-class NSEDataService {
+// List of NIFTY 500 stock symbols (top 100 most traded for faster loading)
+const NIFTY_SYMBOLS = [
+  'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'HINDUNILVR', 'SBIN', 'BHARTIARTL',
+  'KOTAKBANK', 'ITC', 'LT', 'AXISBANK', 'ASIANPAINT', 'MARUTI', 'HCLTECH', 'SUNPHARMA',
+  'TITAN', 'BAJFINANCE', 'ULTRACEMCO', 'WIPRO', 'NESTLEIND', 'ONGC', 'NTPC', 'POWERGRID',
+  'M&M', 'TATAMOTORS', 'JSWSTEEL', 'TATASTEEL', 'ADANIENT', 'ADANIPORTS', 'TECHM',
+  'INDUSINDBK', 'HINDALCO', 'DRREDDY', 'CIPLA', 'BAJAJFINSV', 'GRASIM', 'DIVISLAB',
+  'BPCL', 'BRITANNIA', 'EICHERMOT', 'APOLLOHOSP', 'COALINDIA', 'TATACONSUM', 'HEROMOTOCO',
+  'SBILIFE', 'HDFCLIFE', 'DABUR', 'PIDILITIND', 'HAVELLS', 'SIEMENS', 'GODREJCP',
+  'DLF', 'INDUSTOWER', 'BANKBARODA', 'ICICIGI', 'BAJAJ-AUTO', 'AMBUJACEM', 'SHREECEM',
+  'VEDL', 'JINDALSTEL', 'TRENT', 'ZOMATO', 'PAYTM', 'NYKAA', 'POLICYBZR', 'DELHIVERY',
+  'IRCTC', 'HAL', 'BEL', 'BHEL', 'GAIL', 'IOC', 'RECLTD', 'PFC', 'NHPC', 'SJVN',
+  'TATAPOWER', 'ADANIGREEN', 'ADANIPOWER', 'TORNTPOWER', 'CUMMINSIND', 'VOLTAS',
+  'BLUESTARCO', 'CROMPTON', 'WHIRLPOOL', 'BATAINDIA', 'RELAXO', 'PAGEIND', 'ABFRL',
+  'MPHASIS', 'LTIM', 'COFORGE', 'PERSISTENT', 'LTTS', 'ZYDUSLIFE', 'AUROPHARMA',
+  'LUPIN', 'BIOCON', 'ALKEM', 'TORNTPHARM'
+];
+
+class YahooFinanceService {
   constructor() {
-    this.cookies = '';
-    this.lastCookieRefresh = 0;
-    this.cookieRefreshInterval = 300000; // 5 minutes
     this.cache = {
       stockList: null,
       stockListTimestamp: 0,
@@ -14,57 +28,44 @@ class NSEDataService {
     this.cacheTimeout = 60000; // 1 minute cache
   }
 
-  async refreshCookies() {
+  async fetchStockData(symbol) {
     try {
-      const response = await axios.get(config.NSE_BASE_URL, {
-        headers: config.NSE_HEADERS,
+      const yahooSymbol = `${symbol}.NS`;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=1d&range=1d`;
+
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
         timeout: 10000
       });
 
-      const setCookies = response.headers['set-cookie'];
-      if (setCookies) {
-        this.cookies = setCookies.map(cookie => cookie.split(';')[0]).join('; ');
-        this.lastCookieRefresh = Date.now();
-        console.log('NSE cookies refreshed successfully');
-      }
-      return true;
+      const result = response.data.chart.result[0];
+      const meta = result.meta;
+      const quote = result.indicators.quote[0];
+
+      // Get the latest values
+      const lastIndex = quote.close.length - 1;
+      const currentPrice = meta.regularMarketPrice || quote.close[lastIndex];
+      const previousClose = meta.chartPreviousClose || meta.previousClose;
+      const openPrice = quote.open[0] || meta.regularMarketOpen || previousClose;
+
+      return {
+        symbol: symbol,
+        companyName: meta.shortName || meta.longName || symbol,
+        open: openPrice,
+        high: meta.regularMarketDayHigh || Math.max(...quote.high.filter(h => h)),
+        low: meta.regularMarketDayLow || Math.min(...quote.low.filter(l => l)),
+        close: currentPrice,
+        previousClose: previousClose,
+        change: currentPrice - previousClose,
+        changePercent: ((currentPrice - previousClose) / previousClose) * 100,
+        volume: meta.regularMarketVolume || quote.volume[lastIndex] || 0,
+        timestamp: new Date().toISOString()
+      };
     } catch (error) {
-      console.error('Error refreshing cookies:', error.message);
-      return false;
-    }
-  }
-
-  async ensureCookies() {
-    if (!this.cookies || Date.now() - this.lastCookieRefresh > this.cookieRefreshInterval) {
-      await this.refreshCookies();
-    }
-  }
-
-  getHeaders() {
-    return {
-      ...config.NSE_HEADERS,
-      'Cookie': this.cookies
-    };
-  }
-
-  async fetchWithRetry(url, retries = 3) {
-    await this.ensureCookies();
-
-    for (let i = 0; i < retries; i++) {
-      try {
-        const response = await axios.get(url, {
-          headers: this.getHeaders(),
-          timeout: 15000
-        });
-        return response.data;
-      } catch (error) {
-        if (i === retries - 1) throw error;
-
-        // Refresh cookies and retry
-        console.log(`Retry ${i + 1}/${retries} for ${url}`);
-        await this.refreshCookies();
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+      console.error(`Error fetching ${symbol}:`, error.message);
+      return null;
     }
   }
 
@@ -74,63 +75,37 @@ class NSEDataService {
       return this.cache.stockList;
     }
 
-    try {
-      const url = `${config.NSE_BASE_URL}/api/equity-stockIndices?index=NIFTY%20500`;
-      const data = await this.fetchWithRetry(url);
+    console.log('Fetching stock data from Yahoo Finance...');
 
-      if (data && data.data) {
-        const stocks = data.data.map(stock => ({
-          symbol: stock.symbol,
-          companyName: stock.meta?.companyName || stock.symbol,
-          open: stock.open,
-          high: stock.dayHigh,
-          low: stock.dayLow,
-          close: stock.lastPrice,
-          previousClose: stock.previousClose,
-          change: stock.change,
-          changePercent: stock.pChange,
-          volume: stock.totalTradedVolume,
-          timestamp: new Date().toISOString()
-        }));
+    // Fetch stocks in batches to avoid rate limiting
+    const batchSize = 10;
+    const stocks = [];
 
-        this.cache.stockList = stocks;
-        this.cache.stockListTimestamp = Date.now();
+    for (let i = 0; i < NIFTY_SYMBOLS.length; i += batchSize) {
+      const batch = NIFTY_SYMBOLS.slice(i, i + batchSize);
+      const promises = batch.map(symbol => this.fetchStockData(symbol));
+      const results = await Promise.all(promises);
 
-        return stocks;
+      results.forEach(stock => {
+        if (stock) stocks.push(stock);
+      });
+
+      // Small delay between batches to avoid rate limiting
+      if (i + batchSize < NIFTY_SYMBOLS.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
-
-      throw new Error('Invalid response from NSE');
-    } catch (error) {
-      console.error('Error fetching NIFTY 500 stocks:', error.message);
-      throw error;
     }
+
+    console.log(`Fetched ${stocks.length} stocks from Yahoo Finance`);
+
+    this.cache.stockList = stocks;
+    this.cache.stockListTimestamp = Date.now();
+
+    return stocks;
   }
 
   async getStockQuote(symbol) {
-    try {
-      const url = `${config.NSE_BASE_URL}/api/quote-equity?symbol=${encodeURIComponent(symbol)}`;
-      const data = await this.fetchWithRetry(url);
-
-      if (data && data.priceInfo) {
-        return {
-          symbol: data.info?.symbol || symbol,
-          companyName: data.info?.companyName || symbol,
-          open: data.priceInfo.open,
-          high: data.priceInfo.intraDayHighLow?.max,
-          low: data.priceInfo.intraDayHighLow?.min,
-          close: data.priceInfo.lastPrice,
-          previousClose: data.priceInfo.previousClose,
-          change: data.priceInfo.change,
-          changePercent: data.priceInfo.pChange,
-          volume: data.preOpenMarket?.totalTradedVolume || 0
-        };
-      }
-
-      throw new Error(`No data found for symbol: ${symbol}`);
-    } catch (error) {
-      console.error(`Error fetching quote for ${symbol}:`, error.message);
-      throw error;
-    }
+    return await this.fetchStockData(symbol);
   }
 
   async getHistoricalData(symbol, days = 20) {
@@ -143,39 +118,35 @@ class NSEDataService {
     }
 
     try {
-      // NSE historical data endpoint
-      const toDate = new Date();
-      const fromDate = new Date();
-      fromDate.setDate(fromDate.getDate() - days * 2); // Extra days for weekends/holidays
+      const yahooSymbol = `${symbol}.NS`;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=1d&range=1mo`;
 
-      const from = fromDate.toISOString().split('T')[0].split('-').reverse().join('-');
-      const to = toDate.toISOString().split('T')[0].split('-').reverse().join('-');
+      const response = await axios.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        timeout: 10000
+      });
 
-      const url = `${config.NSE_BASE_URL}/api/historical/cm/equity?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}`;
-      const data = await this.fetchWithRetry(url);
+      const result = response.data.chart.result[0];
+      const timestamps = result.timestamp;
+      const quote = result.indicators.quote[0];
 
-      if (data && data.data) {
-        const historicalData = data.data
-          .slice(0, days)
-          .map(item => ({
-            date: item.CH_TIMESTAMP,
-            open: item.CH_OPENING_PRICE,
-            high: item.CH_TRADE_HIGH_PRICE,
-            low: item.CH_TRADE_LOW_PRICE,
-            close: item.CH_CLOSING_PRICE,
-            volume: item.CH_TOT_TRADED_QTY
-          }))
-          .reverse();
+      const historicalData = timestamps.map((ts, i) => ({
+        date: new Date(ts * 1000).toISOString().split('T')[0],
+        open: quote.open[i],
+        high: quote.high[i],
+        low: quote.low[i],
+        close: quote.close[i],
+        volume: quote.volume[i]
+      })).filter(d => d.close !== null).slice(-days);
 
-        this.cache.historicalData.set(cacheKey, {
-          data: historicalData,
-          timestamp: Date.now()
-        });
+      this.cache.historicalData.set(cacheKey, {
+        data: historicalData,
+        timestamp: Date.now()
+      });
 
-        return historicalData;
-      }
-
-      return [];
+      return historicalData;
     } catch (error) {
       console.error(`Error fetching historical data for ${symbol}:`, error.message);
       return [];
@@ -189,4 +160,4 @@ class NSEDataService {
   }
 }
 
-module.exports = new NSEDataService();
+module.exports = new YahooFinanceService();

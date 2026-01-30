@@ -29,6 +29,7 @@
 
   <nav class="tabs">
     <button class="tab-btn active" data-tab="live">Live Signals</button>
+    <button class="tab-btn" data-tab="positions">My Positions</button>
     <button class="tab-btn" data-tab="history">Signal History</button>
     <button class="tab-btn" data-tab="stats">Statistics</button>
   </nav>
@@ -63,6 +64,19 @@
   </div>
 
   <div id="signals-container" class="signals-container"></div>
+  </div>
+
+  <div id="positions-tab" class="tab-content">
+    <div class="positions-header">
+      <h3>Watching <span id="positions-count">0</span> stocks</h3>
+      <p class="positions-info">Exit alert when price falls to Open + 1.5%</p>
+      <button id="clear-positions-btn" class="clear-btn">Clear All</button>
+    </div>
+    <div id="no-positions" class="no-signals">
+      <p>No positions added yet.</p>
+      <p>Tap "Add to Watch" on any BUY signal to track it.</p>
+    </div>
+    <div id="positions-container" class="signals-container"></div>
   </div>
 
   <div id="history-tab" class="tab-content">
