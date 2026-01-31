@@ -133,6 +133,27 @@ header .subtitle {
   opacity: 0.7;
 }
 
+/* Test Sound Button */
+.test-sound-btn {
+  padding: 8px 14px;
+  background: #2f3336;
+  border: 1px solid #3f4448;
+  color: #e7e9ea;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.test-sound-btn:hover {
+  background: #3f4448;
+  border-color: #1d9bf0;
+}
+
+.test-sound-btn:active {
+  transform: scale(0.95);
+}
+
 /* PWA Install Button */
 .install-btn {
   padding: 8px 16px;

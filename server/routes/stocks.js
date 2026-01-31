@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const stockAnalyzer = require('../services/stockAnalyzer');
 const signalHistory = require('../services/signalHistory');
+const pushNotification = require('../services/pushNotification');
 
 // In-memory cache for signals
 let signalsCache = {
@@ -179,6 +180,78 @@ router.get('/stats', (req, res) => {
       message: error.message
     });
   }
+});
+
+// GET /api/push/vapid-public-key - Get VAPID public key for push subscription
+router.get('/push/vapid-public-key', (req, res) => {
+  res.json({
+    success: true,
+    publicKey: pushNotification.getPublicKey()
+  });
+});
+
+// POST /api/push/subscribe - Subscribe to push notifications
+router.post('/push/subscribe', (req, res) => {
+  try {
+    const subscription = req.body;
+
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid subscription object'
+      });
+    }
+
+    pushNotification.addSubscription(subscription);
+
+    res.json({
+      success: true,
+      message: 'Subscribed to push notifications'
+    });
+  } catch (error) {
+    console.error('Error subscribing to push:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to subscribe',
+      message: error.message
+    });
+  }
+});
+
+// POST /api/push/unsubscribe - Unsubscribe from push notifications
+router.post('/push/unsubscribe', (req, res) => {
+  try {
+    const { endpoint } = req.body;
+
+    if (!endpoint) {
+      return res.status(400).json({
+        success: false,
+        error: 'Endpoint required'
+      });
+    }
+
+    pushNotification.removeSubscription(endpoint);
+
+    res.json({
+      success: true,
+      message: 'Unsubscribed from push notifications'
+    });
+  } catch (error) {
+    console.error('Error unsubscribing from push:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to unsubscribe',
+      message: error.message
+    });
+  }
+});
+
+// GET /api/push/status - Get push notification status
+router.get('/push/status', (req, res) => {
+  res.json({
+    success: true,
+    subscriberCount: pushNotification.getSubscriptionCount()
+  });
 });
 
 module.exports = router;

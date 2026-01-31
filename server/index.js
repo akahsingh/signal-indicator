@@ -1,8 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const cron = require('node-cron');
 const config = require('./config');
 const stocksRouter = require('./routes/stocks');
+const stockAnalyzer = require('./services/stockAnalyzer');
+const pushNotification = require('./services/pushNotification');
 
 const app = express();
 
@@ -31,6 +34,43 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Background job: Check signals and send push notifications every 5 minutes during market hours
+// Market hours: 9:15 AM to 3:30 PM IST (Monday to Friday)
+cron.schedule('*/5 9-15 * * 1-5', async () => {
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const timeInMinutes = hours * 60 + minutes;
+
+  // Skip if outside market hours (9:15 AM to 3:30 PM)
+  if (timeInMinutes < 9 * 60 + 15 || timeInMinutes > 15 * 60 + 30) {
+    return;
+  }
+
+  console.log('[Cron] Checking for new signals...');
+  try {
+    const signals = await stockAnalyzer.analyzeStocks();
+    if (signals && signals.length > 0) {
+      const result = await pushNotification.notifyNewSignals(signals);
+      if (result.buySignals > 0 || result.sellSignals > 0) {
+        console.log(`[Cron] Sent notifications: ${result.buySignals} BUY, ${result.sellSignals} SELL`);
+      }
+    }
+  } catch (error) {
+    console.error('[Cron] Error checking signals:', error.message);
+  }
+}, {
+  timezone: 'Asia/Kolkata'
+});
+
+// Clear notification history at market open (9:15 AM IST on weekdays)
+cron.schedule('15 9 * * 1-5', () => {
+  console.log('[Cron] Market open - clearing daily notification history');
+  pushNotification.clearDailyNotifications();
+}, {
+  timezone: 'Asia/Kolkata'
+});
+
 // Start server
 app.listen(config.PORT, () => {
   console.log(`
@@ -47,6 +87,7 @@ app.listen(config.PORT, () => {
 ║   • ATR Period: ${config.ATR_PERIOD}                                       ║
 ║   • SL Multiplier: ${config.ATR_SL_MULTIPLIER}x ATR                           ║
 ║   • Target Multipliers: ${config.ATR_TARGET_MULTIPLIERS.join('x, ')}x ATR                   ║
+║   • Push Notifications: ENABLED (every 5 min)              ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
   `);

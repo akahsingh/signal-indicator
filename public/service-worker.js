@@ -1,5 +1,5 @@
 // Service Worker for Intraday Signal Indicator PWA
-const CACHE_NAME = 'signal-indicator-v1';
+const CACHE_NAME = 'signal-indicator-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -100,25 +100,40 @@ self.addEventListener('push', (event) => {
   let data = {
     title: 'New Trading Signal',
     body: 'Check the app for new signals!',
-    icon: '/icons/icon-192x192.png',
-    badge: '/icons/icon-72x72.png'
+    icon: '/icons/icon.svg',
+    badge: '/icons/icon.svg',
+    soundType: 'signal'
   };
 
   try {
     if (event.data) {
-      data = event.data.json();
+      data = { ...data, ...event.data.json() };
     }
   } catch (e) {
     console.log('[Service Worker] Error parsing push data:', e);
   }
 
+  // Determine vibration pattern based on notification type
+  let vibrationPattern;
+  if (data.soundType === 'exit' || data.soundType === 'warning' || data.title.includes('EXIT')) {
+    // Urgent vibration for exit warnings
+    vibrationPattern = [300, 100, 300, 100, 300, 100, 300];
+  } else if (data.soundType === 'buy' || data.soundType === 'signal' || data.title.includes('BUY')) {
+    // Double vibrate for buy signals
+    vibrationPattern = [200, 100, 200, 100, 200];
+  } else {
+    // Default vibration
+    vibrationPattern = [200, 100, 200];
+  }
+
   const options = {
     body: data.body,
-    icon: data.icon || '/icons/icon-192x192.png',
-    badge: data.badge || '/icons/icon-72x72.png',
-    vibrate: [100, 50, 100],
+    icon: data.icon || '/icons/icon.svg',
+    badge: data.badge || '/icons/icon.svg',
+    vibrate: vibrationPattern,
     data: {
       url: data.url || '/',
+      soundType: data.soundType,
       dateOfArrival: Date.now()
     },
     actions: [
@@ -127,7 +142,8 @@ self.addEventListener('push', (event) => {
     ],
     tag: data.tag || 'signal-notification',
     renotify: true,
-    requireInteraction: true
+    requireInteraction: true,
+    silent: false
   };
 
   event.waitUntil(
@@ -167,17 +183,31 @@ self.addEventListener('message', (event) => {
   console.log('[Service Worker] Message received:', event.data);
 
   if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
-    const { title, body, tag } = event.data;
+    const { title, body, tag, soundType } = event.data;
+
+    // Determine vibration pattern based on notification type
+    let vibrationPattern;
+    if (soundType === 'exit' || soundType === 'warning') {
+      // Urgent vibration for exit warnings
+      vibrationPattern = [300, 100, 300, 100, 300, 100, 300];
+    } else if (soundType === 'buy' || soundType === 'signal') {
+      // Double vibrate for buy signals
+      vibrationPattern = [200, 100, 200, 100, 200];
+    } else {
+      // Default vibration
+      vibrationPattern = [200, 100, 200];
+    }
 
     self.registration.showNotification(title, {
       body: body,
-      icon: '/icons/icon-192x192.png',
-      badge: '/icons/icon-72x72.png',
-      vibrate: [100, 50, 100],
+      icon: '/icons/icon.svg',
+      badge: '/icons/icon.svg',
+      vibrate: vibrationPattern,
       tag: tag || 'signal-' + Date.now(),
       renotify: true,
       requireInteraction: true,
-      data: { url: '/' }
+      silent: false,
+      data: { url: '/', soundType: soundType }
     });
   }
 

@@ -44,7 +44,28 @@ document.addEventListener('DOMContentLoaded', () => {
   setupAutoRefresh();
   setupNotifications();
   setupInstallPrompt();
+  setupAudioContext(); // Initialize audio for mobile
 });
+
+// Initialize audio context on user interaction (required for mobile browsers)
+function setupAudioContext() {
+  const initAudio = () => {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+    // Remove listeners after first interaction
+    document.removeEventListener('click', initAudio);
+    document.removeEventListener('touchstart', initAudio);
+    console.log('Audio context initialized');
+  };
+
+  // Initialize on first user interaction
+  document.addEventListener('click', initAudio);
+  document.addEventListener('touchstart', initAudio);
+}
 
 // ==================== POSITION TRACKING ====================
 
@@ -486,6 +507,8 @@ function setupNotifications() {
   if (Notification.permission === 'granted') {
     notificationsEnabled = true;
     updateNotificationButton(true);
+    // Try to subscribe to push if already granted
+    subscribeToPush();
   } else if (Notification.permission === 'denied') {
     updateNotificationButton(false, true);
   }
@@ -508,7 +531,15 @@ async function requestNotificationPermission() {
     if (permission === 'granted') {
       notificationsEnabled = true;
       updateNotificationButton(true);
-      showNotification('Notifications Enabled', 'You will now receive alerts for new trading signals!', 'info');
+
+      // Subscribe to push notifications
+      const pushSubscribed = await subscribeToPush();
+
+      if (pushSubscribed) {
+        showNotification('Notifications Enabled', 'You will receive alerts even when the browser is closed!', 'info');
+      } else {
+        showNotification('Notifications Enabled', 'You will receive alerts for new trading signals!', 'info');
+      }
     } else {
       notificationsEnabled = false;
       updateNotificationButton(false, permission === 'denied');
@@ -516,6 +547,101 @@ async function requestNotificationPermission() {
   } catch (error) {
     console.error('Error requesting notification permission:', error);
   }
+}
+
+// Subscribe to Web Push notifications
+async function subscribeToPush() {
+  if (!('PushManager' in window)) {
+    console.log('Push notifications not supported');
+    return false;
+  }
+
+  if (!serviceWorkerRegistration) {
+    console.log('Service worker not registered yet');
+    return false;
+  }
+
+  try {
+    // Check if already subscribed
+    let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
+
+    if (subscription) {
+      console.log('Already subscribed to push notifications');
+      // Send subscription to server in case it's not registered
+      await sendSubscriptionToServer(subscription);
+      return true;
+    }
+
+    // Get VAPID public key from server
+    const response = await fetch('/api/push/vapid-public-key');
+    const data = await response.json();
+
+    if (!data.success || !data.publicKey) {
+      console.error('Failed to get VAPID public key');
+      return false;
+    }
+
+    // Convert VAPID key to Uint8Array
+    const vapidPublicKey = urlBase64ToUint8Array(data.publicKey);
+
+    // Subscribe to push notifications
+    subscription = await serviceWorkerRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: vapidPublicKey
+    });
+
+    console.log('Push subscription created:', subscription.endpoint);
+
+    // Send subscription to server
+    await sendSubscriptionToServer(subscription);
+
+    return true;
+  } catch (error) {
+    console.error('Error subscribing to push:', error);
+    return false;
+  }
+}
+
+// Send push subscription to server
+async function sendSubscriptionToServer(subscription) {
+  try {
+    const response = await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(subscription)
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      console.log('Push subscription saved to server');
+      return true;
+    } else {
+      console.error('Failed to save push subscription:', data.error);
+      return false;
+    }
+  } catch (error) {
+    console.error('Error sending subscription to server:', error);
+    return false;
+  }
+}
+
+// Helper: Convert base64 URL to Uint8Array for VAPID key
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
 }
 
 function updateNotificationButton(enabled, denied = false) {
@@ -536,7 +662,21 @@ function updateNotificationButton(enabled, denied = false) {
 }
 
 function showNotification(title, body, type = 'signal') {
+  // Always play sound regardless of notification permission
+  // Determine sound type based on notification content
+  let soundType = type;
+  if (title.includes('EXIT') || title.includes('STOP LOSS')) {
+    soundType = 'exit';
+  } else if (title.includes('BUY') || type === 'signal') {
+    soundType = 'buy';
+  }
+
+  // Play notification sound
+  playNotificationSound(soundType);
+
+  // If notifications not enabled, at least we played the sound
   if (!notificationsEnabled || Notification.permission !== 'granted') {
+    console.log('Notification (sound only):', title, body);
     return;
   }
 
@@ -546,8 +686,8 @@ function showNotification(title, body, type = 'signal') {
     badge: '/icons/icon.svg',
     tag: type === 'signal' ? 'signal-' + Date.now() : 'info',
     requireInteraction: type === 'signal', // Keep signal notifications until user dismisses
-    silent: false,
-    vibrate: [100, 50, 100]
+    silent: false, // Allow system sound
+    vibrate: [200, 100, 200, 100, 200] // Strong vibration pattern for mobile
   };
 
   // Use service worker for notifications (better mobile support)
@@ -556,7 +696,8 @@ function showNotification(title, body, type = 'signal') {
       type: 'SHOW_NOTIFICATION',
       title: title,
       body: body,
-      tag: options.tag
+      tag: options.tag,
+      soundType: soundType
     });
     return;
   }
@@ -601,28 +742,104 @@ function checkForNewSignals(newSignals) {
   previousSignalSymbols = newSignalSymbols;
 }
 
-// Play sound for new signals (optional)
-function playAlertSound() {
+// Notification sound - Base64 encoded short beep sound
+const NOTIFICATION_SOUND_URL = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1xeHxycHOCh4RTZXN9fHNyeYGEgm1idHt5cXJ5gYOBZ2VzeHVxdHqBhIFgaHV5dHB2fIGDfV1rdndycHd9gYN6XG14dXFwd32Bgndcb3l0cHB4fYGBdFxweHNvcXl9gIF0XXF4c25xenyCgHNecnhzbXB6foJ/cV5zeHJtcXt+gn5wX3R4cm1ye3+CfW9gdXhybXN7f4F8bWF1eHFtc3yAgXttYnV4cW10fH+AeWxjdXhwbXV8f4B4a2R2d3BudXx/f3dqZXZ3cG51fH5+dWpmdndvb3Z8fn10amd2d29vdnt+fXNqaHZ3b291e358cmlpdndub3Z7fXxxamt2dm5wdnt9e3Bqa3Z2bnF2ent7b2tsdnZucXd6e3puam12dm5xd3p7em1qbnZ2bnJ3ent5bGpvdnVtcnd5enhrbnB1dW1zd3l6d2tvcHV0bXR3eXl2anBxdXRtdHd5eHVpcHF1dG10d3l4dGhydnRtdHd4d3NncnV0bXV3d3dyZ3N1c2x1d3d2cWZ0dXNtdXd3dXFldXVzbXV3d3RwZXV1c213d3dzcGZ1dXNtd3d2c29mdXVzbXd3dnJuZ3Z1c213dnVxbWd2dXNtd3Z1cWxoeHVybnZ2dHBraHh1cnB2dnNvaml4dHFwd3Zzb2hqeXRxcXd2cm5na3l0cXF3dXJtZmx5c3FyeHVxbGVtendwdHl1cWtkbnx4b3V5dHBjY298em50eXNvYmJve3pudnhybmFhb318bXd4cW1gYHB9fW14d3BsX2FxfX5seHdvbF5hcn5/a3h2bWteYXN+gGt5dm1qXWJ0f4FqendtaVxjdX+Canp2bGhbZHaAgWl7dmxnWmR3gYJpfHZrZVlleYKCaX12amVYZnqCgmh+dWljV2d7g4Npf3VoYVZofYSDaX91Z2BVaH6EhGmAdWZeVGl/hYRpgXVlXVNqgIWFaYJ1ZFxSa4KGhWmDdGNbUWyDhoZphHRiWlBthYeGaYV0YVlPboaIh2mGdGBYTm+HiYdph3RfV02AiImHaYh0XlZMgYqKh2mJc11VTIKLiodqinNcVEuCjIuIaopzW1NKg42Mi2uLc1pSSoSNjYtrjHNZUkmFjo6MbI1zV1FIhY+PjG2Oc1ZQR4aQkI1ujnNVT0aHkZGNb49zVE5FiJKSjnCQc1NNRImTk49wkXJSTESKlJSQcZJyUUtDi5WVkXGTclBKQoyWlpJylXFPSUGNl5eTcpZxTkg/jpiYlHOXcE1HPpCZmZV0mG9MRj2Rmpqadvxta0Q8kpubmHbKbWdCO5Scm5l25GxlQDqVnJyae+NsZD85lp2dnHv/a2M9OJeenZ18//9iPTWYn56dff//YTw0maGgnX3//2A7M5qhn55+//9fOjKbop+ff///XjkxnKKgoH///146MZ2joaGA////XTgwnqSigYH//Fw4MJ+koYGB//5cNy+gpKKCgv//WzcvoKWjg4P//ls2L6GmpIOD//5aNS6ip6WEhP/+WTUuoqelhYX//lk0LqOnpoWG//5YNC2kqKeGhv/+WDMtpainhoeLk5WVlZOPi4aGh6inpKOgnZqYl5aVlZWWl5qbnqGkp6ipqKelpKOhoJ6dnJubm5ydn6GjpaeorKysrKupqKelpKOhn5+fn5+goaOlp6msra+vsK+uraupp6WkoqGgoKChoaOlqKqsrrCxsrKxsK6sqaelpKKhoKChoaOlqautsbK0tba1tLKwraqnpKKhoPaAAAAADAN0cnVlAwNpbnQSvgsAAAAH7QAAAAl0aW1lc3RhbXAFBmJpbmFyeRgE';
+
+// Audio context for playing notification sounds
+let audioContext = null;
+
+// Play notification sound with proper volume
+function playNotificationSound(type = 'signal') {
   try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    // Try using Audio element first (better mobile support)
+    const audio = new Audio(NOTIFICATION_SOUND_URL);
+    audio.volume = 0.7;
+
+    // Play the audio
+    const playPromise = audio.play();
+
+    if (playPromise !== undefined) {
+      playPromise.catch(error => {
+        console.log('Audio play failed, trying Web Audio API:', error);
+        // Fallback to Web Audio API
+        playAlertSoundFallback(type);
+      });
+    }
+  } catch (error) {
+    console.log('Audio element failed, using fallback:', error);
+    playAlertSoundFallback(type);
+  }
+}
+
+// Fallback sound using Web Audio API
+function playAlertSoundFallback(type = 'signal') {
+  try {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    // Resume audio context if suspended (required for mobile)
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
 
     oscillator.connect(gainNode);
     gainNode.connect(audioContext.destination);
 
-    oscillator.frequency.value = 800;
-    oscillator.type = 'sine';
-    gainNode.gain.value = 0.3;
+    // Different sound patterns for different notification types
+    if (type === 'signal' || type === 'buy') {
+      // Upbeat sound for buy signals
+      oscillator.frequency.value = 880; // A5 note
+      oscillator.type = 'sine';
+      gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
 
-    oscillator.start();
-    setTimeout(() => {
-      oscillator.stop();
-      audioContext.close();
-    }, 200);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+
+      // Play second beep
+      setTimeout(() => {
+        const osc2 = audioContext.createOscillator();
+        const gain2 = audioContext.createGain();
+        osc2.connect(gain2);
+        gain2.connect(audioContext.destination);
+        osc2.frequency.value = 1046.5; // C6 note
+        osc2.type = 'sine';
+        gain2.gain.setValueAtTime(0.5, audioContext.currentTime);
+        gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+        osc2.start(audioContext.currentTime);
+        osc2.stop(audioContext.currentTime + 0.3);
+      }, 150);
+    } else if (type === 'exit' || type === 'warning') {
+      // Alert sound for exit warnings
+      oscillator.frequency.value = 440; // A4 note
+      oscillator.type = 'square';
+      gainNode.gain.setValueAtTime(0.4, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.8);
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.8);
+    } else {
+      // Default notification sound
+      oscillator.frequency.value = 660;
+      oscillator.type = 'sine';
+      gainNode.gain.setValueAtTime(0.4, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    }
   } catch (error) {
     console.log('Could not play sound:', error);
   }
+}
+
+// Legacy function for backwards compatibility
+function playAlertSound() {
+  playNotificationSound('signal');
 }
 
 // ==================== END NOTIFICATION SYSTEM ====================
@@ -659,6 +876,27 @@ function setupEventListeners() {
   // Clear positions button
   if (clearPositionsBtn) {
     clearPositionsBtn.addEventListener('click', clearAllPositions);
+  }
+
+  // Test sound button
+  const testSoundBtn = document.getElementById('test-sound-btn');
+  if (testSoundBtn) {
+    testSoundBtn.addEventListener('click', () => {
+      // Initialize audio context if needed
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      // Play test sound
+      playNotificationSound('buy');
+      // Show visual feedback
+      testSoundBtn.textContent = '✓ Sound OK';
+      setTimeout(() => {
+        testSoundBtn.textContent = '🔊 Test';
+      }, 2000);
+    });
   }
 }
 
